@@ -84,32 +84,27 @@ Store::createStore(StoreQueue* storeq, const string& type,
                    const string& category, bool readable,
                    bool multi_category) {
   if (0 == type.compare("file")) {
-    return shared_ptr<Store>(new FileStore(storeq, category, multi_category,
-                                          readable));
+    return shared_ptr<Store>(new FileStore(storeq, category, multi_category, readable));
   } else if (0 == type.compare("buffer")) {
     return shared_ptr<Store>(new BufferStore(storeq,category, multi_category));
   } else if (0 == type.compare("network")) {
-    return shared_ptr<Store>(new NetworkStore(storeq, category,
-                                              multi_category));
+    return shared_ptr<Store>(new NetworkStore(storeq, category, multi_category));
   } else if (0 == type.compare("bucket")) {
-    return shared_ptr<Store>(new BucketStore(storeq, category,
-                                            multi_category));
+    return shared_ptr<Store>(new BucketStore(storeq, category, multi_category));
   } else if (0 == type.compare("thriftfile")) {
-    return shared_ptr<Store>(new ThriftFileStore(storeq, category,
-                                                multi_category));
+    return shared_ptr<Store>(new ThriftFileStore(storeq, category, multi_category));
   } else if (0 == type.compare("null")) {
     return shared_ptr<Store>(new NullStore(storeq, category, multi_category));
   } else if (0 == type.compare("multi")) {
     return shared_ptr<Store>(new MultiStore(storeq, category, multi_category));
   } else if (0 == type.compare("category")) {
-    return shared_ptr<Store>(new CategoryStore(storeq, category,
-                                              multi_category));
+    return shared_ptr<Store>(new CategoryStore(storeq, category, multi_category));
   } else if (0 == type.compare("multifile")) {
-    return shared_ptr<Store>(new MultiFileStore(storeq, category,
-                                                multi_category));
+    return shared_ptr<Store>(new MultiFileStore(storeq, category, multi_category));
   } else if (0 == type.compare("thriftmultifile")) {
-    return shared_ptr<Store>(new ThriftMultiFileStore(storeq, category,
-                                                      multi_category));
+    return shared_ptr<Store>(new ThriftMultiFileStore(storeq, category, multi_category));
+  } else if (0 == type.compare("redis")) {
+    return shared_ptr<Store>(new RedisStore(storeq, category, multi_category));
   } else {
     return shared_ptr<Store>();
   }
@@ -2988,4 +2983,189 @@ ThriftMultiFileStore::~ThriftMultiFileStore() {
 
 void ThriftMultiFileStore::configure(pStoreConf configuration, pStoreConf parent) {
   configureCommon(configuration, parent, "thriftfile");
+}
+
+RedisStore::RedisStore(StoreQueue* storeq,
+                       const string& category,
+                       bool multi_category)
+  : Store(storeq, category, "redis", multi_category),
+  redisHost("localhost"),
+  redisPort(6379),
+  usePipeline(false),
+  usePconnect(false),
+  c(NULL)
+{}
+
+RedisStore::~RedisStore() {
+}
+
+boost::shared_ptr<Store> RedisStore::copy(const std::string &category) {
+  RedisStore *store = new RedisStore(storeQueue, category, multiCategory);
+  shared_ptr<Store> copied = shared_ptr<Store>(store);
+  return copied;
+}
+
+bool RedisStore::open() {
+  struct timeval timeout = { 1, 500000 }; // 1.5 seconds
+
+  try {
+    c = redisConnectWithTimeout(redisHost.c_str(), redisPort, timeout);
+    if (c == NULL || c->err) {
+      LOG_OPER("[%s] Failure redisConnect: %s, host: %s, port: %d", categoryHandled.c_str(), c->errstr, redisHost.c_str(), redisPort);
+      return false;
+    }
+  } catch(std::exception const& e) {
+    LOG_OPER("[%s] Exception redisConnect: %s", categoryHandled.c_str(), e.what());
+    return false;
+  }
+
+  return true;
+}
+
+bool RedisStore::isOpen() {
+  if (c == NULL) {
+    return false;
+  }
+
+  redisReply *reply = NULL;
+  bool is_open = true;
+
+  try {
+    reply = (redisReply*)redisCommand(c, "PING");
+    if (reply == NULL || c->err) {
+      LOG_OPER("[%s] Failure redisCommand PING: %s", categoryHandled.c_str(), c->errstr);
+      is_open = false;
+    }
+  } catch(std::exception const& e) {
+    LOG_OPER("[%s] Exception redisCommand PING: %s", categoryHandled.c_str(), e.what());
+    is_open = false;
+  }
+
+  if (reply) {
+    freeReplyObject(reply);
+    reply = NULL;
+  }
+
+  return is_open;
+}
+
+void RedisStore::configure(pStoreConf configuration, pStoreConf parent) {
+  Store::configure(configuration, parent);
+
+  configuration->getString("redis_host", redisHost);
+  configuration->getUnsigned("redis_port", redisPort);
+
+  string temp;
+  if (configuration->getString("use_pipeline", temp)) {
+    if (0 == temp.compare("yes")) {
+      usePipeline = true;
+    }
+  }
+  if (configuration->getString("use_pconnect", temp)) {
+    if (0 == temp.compare("yes")) {
+      usePconnect = true;
+    }
+  }
+}
+
+void RedisStore::close() {
+  if (c) {
+    redisFree(c);
+    c = NULL;
+  }
+}
+
+bool RedisStore::handleMessages(boost::shared_ptr<logentry_vector_t> messages) {
+  unsigned long int keylen = categoryHandled.length() + 1;
+  unsigned long int cmdlen = keylen + 16;
+
+  char key[keylen];
+  memset(key, 0, keylen);
+  sprintf(key, "%s", categoryHandled.c_str()); // redis queue key name = category name
+
+  // open redis connection
+  if (!isOpen()) {
+    if (!open()) {
+      close();
+      return false;
+    }
+  }
+
+  // redis...
+  redisReply *reply = NULL;
+
+  // messages
+  unsigned long int commands = 0;
+  for (logentry_vector_t::iterator iter = messages->begin();
+       iter != messages->end();
+       ++iter) {
+
+    std::string message = (*iter)->message;
+    unsigned long int msglen = message.length();
+    char msg[msglen];
+    memset(msg, 0, msglen);
+    memcpy(&msg, message.c_str(), msglen);
+    msg[msglen - 1] = '\0';
+
+    char cmd[cmdlen];
+    memset(cmd, 0, cmdlen);
+    sprintf(cmd, "LPUSH %s %%s", key);
+
+    try {
+      if (usePipeline) {
+        redisAppendCommand(c, cmd, msg);
+        commands++;
+      } else {
+        reply = (redisReply*)redisCommand(c, cmd, msg);
+        if (reply == NULL || c->err) {
+          LOG_OPER("[%s] Failure redisCommand: %s", categoryHandled.c_str(), c->errstr);
+          return false;
+        }
+        freeReplyObject(reply);
+      }
+    } catch(std::exception const& e) {
+      LOG_OPER("[%s] Exception redisCommand: %s", categoryHandled.c_str(), e.what());
+      return false;
+    }
+  }
+
+  if (usePipeline) {
+    try {
+      for (int i = 0; i < commands; ++i) {
+        int ret = redisGetReply(c, (void**)&reply);
+        if (ret == REDIS_ERR || reply == NULL || c->err) {
+          LOG_OPER("[%s] Failure redisGetReply: %s", categoryHandled.c_str(), c->errstr);
+          return false;
+        }
+        freeReplyObject(reply);
+      }
+    } catch(std::exception const& e) {
+      LOG_OPER("[%s] Exception redisGetReply: %s", categoryHandled.c_str(), e.what());
+    }
+  }
+
+  // close redis connection
+  if (usePconnect == false) {
+    close();
+  }
+
+  return true;
+}
+
+void RedisStore::flush() {
+}
+
+bool RedisStore::readOldest(/*out*/ boost::shared_ptr<logentry_vector_t> messages, struct tm* now) {
+  return true;
+}
+
+bool RedisStore::replaceOldest(boost::shared_ptr<logentry_vector_t> messages, struct tm* now) {
+  return true;
+}
+
+void RedisStore::deleteOldest(struct tm* now) {
+}
+
+bool RedisStore::empty(struct tm* now) {
+  return true;
 }
