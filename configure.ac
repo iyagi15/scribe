@@ -58,6 +58,7 @@ FB_WITH_PATH([fb303_home], [fb303path], [/usr/local])
 FB_WITH_PATH([smc_home], [smcpath], [${EXTERNAL_PATH}/services/trunk/src])
 FB_WITH_PATH([fb_home], [fbpath], [${EXTERNAL_PATH}/libfacebook])
 FB_WITH_PATH([hadoop_home], [hadooppath], [/usr/local])
+FB_WITH_PATH([hiredis_home], [hiredispath], [/usr/local])
 
 # Require boost 1.36 with system and filesytem libraries
 AX_BOOST_BASE([1.36])
