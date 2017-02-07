@@ -34,6 +34,10 @@
 #include "store_queue.h"
 #include "network_dynamic_config.h"
 
+extern "C" {
+   #include <hiredis.h>
+}
+
 class StoreQueue;
 
 /* defines used by the store class */
@@ -626,4 +630,48 @@ class ThriftMultiFileStore : public CategoryStore {
   ThriftMultiFileStore(Store& rhs);
   ThriftMultiFileStore& operator=(Store& rhs);
 };
+
+/*
+ * This store will log to a redis server
+ */
+class RedisStore : public Store {
+
+ public:
+  RedisStore(StoreQueue* storeq,
+             const std::string& category,
+             bool multi_category);
+  virtual ~RedisStore();
+
+  boost::shared_ptr<Store> copy(const std::string &category);
+  bool open();
+  bool isOpen();
+  void configure(pStoreConf configuration, pStoreConf parent);
+  void close();
+
+  bool handleMessages(boost::shared_ptr<logentry_vector_t> messages);
+  void flush();
+
+  // configuration
+  std::string redisHost;
+  unsigned long int redisPort;
+  bool usePipeline;
+  bool usePconnect;
+  
+  // redis
+  redisContext *c;
+
+  // null stores are readable, but you never get anything
+  virtual bool readOldest(/*out*/ boost::shared_ptr<logentry_vector_t> messages, struct tm* now);
+  virtual bool replaceOldest(boost::shared_ptr<logentry_vector_t> messages, struct tm* now);
+  virtual void deleteOldest(struct tm* now);
+  virtual bool empty(struct tm* now);
+
+
+ private:
+  // disallow empty constructor, copy and assignment
+  RedisStore();
+  RedisStore(Store& rhs);
+  RedisStore& operator=(Store& rhs);
+};
+
 #endif // SCRIBE_STORE_H
