@@ -3002,6 +3002,12 @@ RedisStore::~RedisStore() {
 boost::shared_ptr<Store> RedisStore::copy(const std::string &category) {
   RedisStore *store = new RedisStore(storeQueue, category, multiCategory);
   shared_ptr<Store> copied = shared_ptr<Store>(store);
+
+  store->redisHost = redisHost;
+  store->redisPort = redisPort;
+  store->usePipeline = usePipeline;
+  store->usePconnect = usePconnect;
+
   return copied;
 }
 
