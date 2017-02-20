@@ -1802,8 +1802,7 @@ void NetworkStore::configure(pStoreConf configuration, pStoreConf parent) {
     configmod = getNetworkDynamicConfigMod(dynamicType.c_str());
     if (configmod) {
       if (!configmod->isConfigValidFunc(categoryHandled, configuration.get())) {
-        LOG_OPER("[%s] dynamic network configuration is not valid.",
-                categoryHandled.c_str());
+        LOG_OPER("[%s] dynamic network configuration is not valid.", categoryHandled.c_str());
         configmod = NULL;
       } else {
         // set remote host port
@@ -1876,8 +1875,7 @@ bool NetworkStore::open() {
     if (lastServiceCheck <= (time_t) (now - serviceCacheTimeout)) {
       lastServiceCheck = now;
 
-      success = scribe::network_config::getService(serviceName, serviceOptions,
-                                                   servers);
+      success = scribe::network_config::getService(serviceName, serviceOptions, servers);
     }
   } else if (listBased) {
     // load 'servers' from the list
@@ -1896,11 +1894,9 @@ bool NetworkStore::open() {
       opened = g_connPool.open(serviceName, servers, static_cast<int>(timeout));
     } else {
       if (unpooledConn != NULL) {
-        LOG_OPER("Logic error: NetworkStore::open unpooledConn is not NULL"
-            " service = %s", serviceName.c_str());
+        LOG_OPER("Logic error: NetworkStore::open unpooledConn is not NULL service = %s", serviceName.c_str());
       }
-      unpooledConn = shared_ptr<scribeConn>(new scribeConn(serviceName,
-            servers, static_cast<int>(timeout)));
+      unpooledConn = shared_ptr<scribeConn>(new scribeConn(serviceName, servers, static_cast<int>(timeout)));
       opened = unpooledConn->open();
       if (!opened) {
         unpooledConn.reset();
@@ -1919,11 +1915,9 @@ bool NetworkStore::open() {
     } else {
       // only open unpooled connection if not already open
       if (unpooledConn != NULL) {
-        LOG_OPER("Logic error: NetworkStore::open unpooledConn is not NULL"
-            " %s:%lu", remoteHost.c_str(), remotePort);
+        LOG_OPER("Logic error: NetworkStore::open unpooledConn is not NULL %s:%lu", remoteHost.c_str(), remotePort);
       }
-      unpooledConn = shared_ptr<scribeConn>(new scribeConn(remoteHost,
-          remotePort, static_cast<int>(timeout)));
+      unpooledConn = shared_ptr<scribeConn>(new scribeConn(remoteHost, remotePort, static_cast<int>(timeout)));
       opened = unpooledConn->open();
       if (!opened) {
         unpooledConn.reset();
@@ -1968,12 +1962,18 @@ shared_ptr<Store> NetworkStore::copy(const std::string &category) {
   shared_ptr<Store> copied = shared_ptr<Store>(store);
 
   store->useConnPool = useConnPool;
+  store->ignoreNetworkError = ignoreNetworkError;
   store->serviceBased = serviceBased;
   store->listBased = listBased;
   store->timeout = timeout;
   store->remoteHost = remoteHost;
   store->remotePort = remotePort;
   store->serviceName = serviceName;
+  store->serviceName = serviceName;
+  store->serviceOptions = serviceOptions;
+  store->serviceCacheTimeout = serviceCacheTimeout;
+  store->serviceList = serviceList;
+  store->serviceListDefaultPort = serviceListDefaultPort;
 
   return copied;
 }
@@ -1981,8 +1981,7 @@ shared_ptr<Store> NetworkStore::copy(const std::string &category) {
 
 // If the size of messages is greater than a threshold
 // first try sending an empty vector to catch dfqs
-bool
-NetworkStore::handleMessages(boost::shared_ptr<logentry_vector_t> messages) {
+bool NetworkStore::handleMessages(boost::shared_ptr<logentry_vector_t> messages) {
   int ret;
 
   if (!isOpen()) {
@@ -2016,8 +2015,7 @@ NetworkStore::handleMessages(boost::shared_ptr<logentry_vector_t> messages) {
     }
   } else {
     ret = CONN_FATAL;
-    LOG_OPER("[%s] Logic error: NetworkStore::handleMessages unpooledConn "
-        "is NULL", categoryHandled.c_str());
+    LOG_OPER("[%s] Logic error: NetworkStore::handleMessages unpooledConn is NULL", categoryHandled.c_str());
   }
   if (ret == CONN_FATAL) {
     close();
@@ -2046,8 +2044,7 @@ BucketStore::~BucketStore() {
 }
 
 // Given a single bucket definition, create multiple buckets
-void BucketStore::createBucketsFromBucket(pStoreConf configuration,
-    pStoreConf bucket_conf) {
+void BucketStore::createBucketsFromBucket(pStoreConf configuration, pStoreConf bucket_conf) {
   string error_msg, bucket_subdir, type, path, failure_bucket;
   bool needs_bucket_subdir = false;
   unsigned long bucket_offset = 0;
